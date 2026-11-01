@@ -2,7 +2,7 @@
 
 Nova es tu IA personal. Vive en tu dispositivo y funciona **sin internet**.
 
-**Abrir / instalar:** https://wilmergc17-arch.github.io/nova/
+**Abrir / instalar:** https://wilmergc17-arch.github.io/Nova/
 
 ## Cómo instalarla en el celular (Android)
 1. Abre el enlace de arriba en **Chrome**, con Wi-Fi.
