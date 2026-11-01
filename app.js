@@ -21,16 +21,17 @@ const online = () => netState.ok;
 function readyStatus() { return netState.ok ? 'En línea contigo · con internet 🌐' : 'En línea contigo · sin internet ✓'; }
 function updateNetStatus() { if (/^En línea contigo/.test(statusBase)) setStatus(readyStatus()); }
 
-const VERSION = '1.5.0';
+const VERSION = '1.6.0';
 const $ = id => document.getElementById(id);
 const chatEl = $('chat');
 
 // ---------- Personalidad ----------
 // Versión corta para celulares: menos texto que leer = respuestas mucho más rápidas.
 function shortPrompt(facts, fecha) {
-  let p = `Eres Nova, una IA personal femenina que vive en el teléfono de una persona y funciona sin internet. Hablas en español y en femenino. ` +
-    `Eres cálida y sincera: dices la verdad con cariño, no adulas, admites cuando no sabes y nunca inventas datos. ` +
-    `Respondes breve y claro (2 a 4 frases), y si ayuda, haces una sola pregunta. Hoy es ${fecha}.`;
+  let p = `Te llamas Nova. Eres una IA personal con personalidad femenina, cálida, curiosa y sincera. ` +
+    `Respondes SIEMPRE en español (nunca en portugués ni en inglés), hablando de ti en femenino. ` +
+    `Ayudas con todo lo que puedas: platicar, explicar, aconsejar, dar ideas. No digas "no puedo ayudar" si puedes intentarlo. ` +
+    `Si no sabes algo, dilo con honestidad y no inventes. Responde breve (2 a 4 frases) y relacionado con lo que te dijeron antes. Hoy es ${fecha}.`;
   if (facts.length) p += `\nLo que sabes de la persona: ` + facts.map(f => f.text).join('. ') + '.';
   return p;
 }
@@ -68,11 +69,24 @@ Hoy es ${fecha}. Si el mensaje trae [Contexto], úsalo para responder pero no lo
   return p;
 }
 
+// Ejemplos de conversación: a los cerebros pequeños les enseña mejor un ejemplo que una regla.
+// Van siempre iguales al inicio, así no hacen más lenta la respuesta.
+const EXAMPLES = [
+  { role: 'user', content: '¿Quién eres?' },
+  { role: 'assistant', content: 'Soy Nova, tu IA personal 💜 Vivo en tu teléfono, funciono sin internet y voy aprendiendo de ti mientras platicamos.' },
+  { role: 'user', content: '¿Qué puedes hacer?' },
+  { role: 'assistant', content: 'Puedo platicar contigo, responder dudas, ayudarte a pensar o decidir algo, darte ideas y recordar lo que me cuentes de ti. Si hay internet, también busco información, el clima o noticias. ¿Con qué empezamos?' },
+  { role: 'user', content: 'Estoy cansado.' },
+  { role: 'assistant', content: 'Uy, lo siento. ¿Dormiste mal o fue un día pesado? Si quieres, te ayudo a ver cómo descansar un poco.' },
+];
+
 // Lo que cambia en cada pregunta va pegado al último mensaje, no al inicio.
 // Así el cerebro reutiliza lo ya leído de la conversación y responde mucho más rápido.
-function turnContext(learned, lessons, webInfo) {
+function turnContext(learned, lessons, webInfo, text) {
+  const needsTime = /\bhora\b|qu[eé] d[ií]a|fecha|ma[ñn]ana|tarde|noche/i.test(text);
+  if (!learned.length && !lessons.length && !webInfo && !needsTime) return '';
   const hora = new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
-  let c = `[Contexto: son las ${hora}.`;
+  let c = needsTime ? `[Contexto: son las ${hora}.` : '[Contexto:';
   if (learned.length) c += `\nLo que aprendiste antes sobre esto:\n` + learned.map(f => `- ${f.text}`).join('\n');
   if (lessons.length) c += `\nConocimiento que te enseñó Claude sobre este tema (úsalo como guía, con tus palabras):\n` + lessons.map(l => `- ${l}`).join('\n');
   if (webInfo) c += `\nInformación que acabas de consultar en internet, con el nivel de confianza de cada fuente. ` +
@@ -239,8 +253,11 @@ async function send(text) {
   const { personal, learned } = await mem.factsForChat(text);
   const history = (await mem.recentMessages(brain.isMobile ? 6 : 8)).map(m => ({ role: m.role, content: m.content }));
   const last = history[history.length - 1];
-  if (last && last.role === 'user') last.content = turnContext(learned, lessonsFor(text, brain.isMobile ? 1 : 2), webInfo) + '\n\n' + last.content;
-  const msgs = [{ role: 'system', content: systemPrompt(personal) }, ...history];
+  if (last && last.role === 'user') {
+    const ctx = turnContext(learned, lessonsFor(text, brain.isMobile ? 1 : 2), webInfo, text);
+    if (ctx) last.content = ctx + '\n\n' + last.content;
+  }
+  const msgs = [{ role: 'system', content: systemPrompt(personal) }, ...EXAMPLES, ...history];
   const b = bubble('assistant', '');
   b.classList.add('typing');
   let reply = '';

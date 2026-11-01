@@ -7,14 +7,14 @@ export const MODELS = [
   {
     id: 'ligero',
     name: 'Ligero',
-    desc: 'Para celulares sencillos. Rápido, pero menos lista.',
+    desc: 'Muy rápido, pero bastante limitado: a veces se confunde. Úsalo solo si los otros no funcionan.',
     size: '≈ 400 MB',
     url: 'https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf',
   },
   {
     id: 'recomendado',
     name: 'Recomendado',
-    desc: 'Buen equilibrio para el celular. Habla bien español.',
+    desc: 'El mejor para el celular. Entiende y habla español mucho mejor que el Ligero.',
     size: '≈ 1 GB',
     url: 'https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf',
     recommended: true,
@@ -22,7 +22,7 @@ export const MODELS = [
   {
     id: 'potente',
     name: 'Potente',
-    desc: 'Para laptop o ROG Ally. Más lista, necesita más memoria.',
+    desc: 'El más listo. Para laptop, ROG Ally o celulares de gama alta (como un Galaxy S Ultra). Responde más lento.',
     size: '≈ 1.9 GB',
     url: 'https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf',
   },
@@ -178,7 +178,7 @@ export function info() {
 const FIRST_TOKEN_LIMIT = MOBILE ? 150000 : 120000;
 const NEXT_TOKEN_LIMIT = 60000;
 
-async function chatNow(messages, { onToken, onTick, maxTokens = 300, temperature = 0.7 } = {}) {
+async function chatNow(messages, { onToken, onTick, maxTokens = 300, temperature = 0.5 } = {}) {
   if (!ready()) throw new Error('El cerebro no está cargado.');
   busy = true; replying = true;
   let text = '';
@@ -198,6 +198,7 @@ async function chatNow(messages, { onToken, onTick, maxTokens = 300, temperature
       temperature,
       top_p: 0.9,
       top_k: 40,
+      repeat_penalty: 1.1,
       stream: true,
       abortSignal: ctrl.signal,
     });
