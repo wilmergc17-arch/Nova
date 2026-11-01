@@ -2,17 +2,33 @@ import * as mem from './memory.js';
 import * as brain from './brain.js';
 import * as web from './sources.js';
 import { lessonsFor } from './conocimiento.js';
-const online = () => navigator.onLine;
+// Detecta si de verdad hay internet (el Wi-Fi puede estar conectado sin salida).
+let netState = { ok: navigator.onLine, at: 0 };
+async function checkOnline(force = false) {
+  if (!navigator.onLine) { netState = { ok: false, at: Date.now() }; return false; }
+  if (!force && Date.now() - netState.at < 30000) return netState.ok;
+  try {
+    await Promise.race([
+      fetch('https://www.gstatic.com/generate_204?t=' + Date.now(), { mode: 'no-cors', cache: 'no-store' }),
+      new Promise((_, r) => setTimeout(() => r(new Error('lento')), 4000)),
+    ]);
+    netState = { ok: true, at: Date.now() };
+  } catch { netState = { ok: false, at: Date.now() }; }
+  updateNetStatus();
+  return netState.ok;
+}
+const online = () => netState.ok;
+function readyStatus() { return netState.ok ? 'En línea contigo · con internet 🌐' : 'En línea contigo · sin internet ✓'; }
+function updateNetStatus() { if (/^En línea contigo/.test(statusBase)) setStatus(readyStatus()); }
 
-const VERSION = '1.3.0';
+const VERSION = '1.4.1';
 const $ = id => document.getElementById(id);
 const chatEl = $('chat');
 
 // ---------- Personalidad ----------
-function systemPrompt(facts, webInfo, lessons = []) {
+function systemPrompt(facts) {
   const now = new Date();
   const fecha = now.toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-  const hora = now.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
   let p = `Eres Nova, una inteligencia artificial personal con personalidad femenina. Hablas siempre en español y en femenino cuando hablas de ti ("estoy contenta", "soy curiosa"). Vives en el dispositivo de una sola persona y funcionas sin internet.
 
 Tu forma de ser:
@@ -33,18 +49,26 @@ Ejemplo de tu estilo:
 Persona: ¿Crees que debería dejar mi trabajo?
 Nova: No te puedo decir que sí o que no sin entender más, y no quisiera adivinar con algo tan importante. ¿Qué es lo que más te pesa de tu trabajo ahora mismo?
 
-Hoy es ${fecha} y son las ${hora}.`;
+Hoy es ${fecha}. Si el mensaje trae [Contexto], úsalo para responder pero no lo repitas tal cual.`;
   if (facts.length) {
-    p += `\n\nLo que recuerdas de la persona y lo que has aprendido:\n` + facts.map(f => `- ${f.text}`).join('\n');
+    p += `\n\nLo que recuerdas de la persona:\n` + facts.map(f => `- ${f.text}`).join('\n');
   } else {
     p += `\n\nTodavía no sabes nada de la persona. Si es natural, pregúntale su nombre o algo de ella.`;
   }
-  if (lessons.length) p += `\n\nConocimiento que te enseñó Claude sobre este tema (úsalo como guía, explicado con tus palabras):\n` + lessons.map(l => `- ${l}`).join('\n');
-  if (webInfo) p += `\n\nInformación que acabas de consultar en internet. Cada fuente trae su nivel de confianza. ` +
-    `Antes de responder, DISCIERNE: compara las fuentes; da más peso a las de confianza alta y a lo que coincide en varias; ` +
-    `si se contradicen, dilo y explica cuál parece más fiable; distingue hechos de opiniones; ` +
-    `si solo hay fuentes de confianza baja, avisa que no estás segura. Menciona de dónde sacaste el dato.\n\n${webInfo}`;
   return p;
+}
+
+// Lo que cambia en cada pregunta va pegado al último mensaje, no al inicio.
+// Así el cerebro reutiliza lo ya leído de la conversación y responde mucho más rápido.
+function turnContext(learned, lessons, webInfo) {
+  const hora = new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+  let c = `[Contexto: son las ${hora}.`;
+  if (learned.length) c += `\nLo que aprendiste antes sobre esto:\n` + learned.map(f => `- ${f.text}`).join('\n');
+  if (lessons.length) c += `\nConocimiento que te enseñó Claude sobre este tema (úsalo como guía, con tus palabras):\n` + lessons.map(l => `- ${l}`).join('\n');
+  if (webInfo) c += `\nInformación que acabas de consultar en internet, con el nivel de confianza de cada fuente. ` +
+    `DISCIERNE antes de responder: compara las fuentes; da más peso a las de confianza alta y a lo que coincide en varias; ` +
+    `si se contradicen, dilo; distingue hechos de opiniones; si solo hay confianza baja, avisa que no estás segura. Di de dónde sacaste el dato.\n${webInfo}`;
+  return c + ']';
 }
 
 // ---------- Aprender de internet con criterio ----------
@@ -85,13 +109,27 @@ async function saveLearned(items) {
 // ---------- Aprender de la conversación ----------
 const PERSONAL = /\b(me llamo|mi nombre|soy|tengo|me gusta|me gustan|me encanta|me encantan|odio|no me gusta|prefiero|trabajo|vivo|mi |mis |estudio|quiero|suelo|siempre|nunca|cumplo|cumpleaños|nací|mi esposa|mi esposo|mi novia|mi novio|mi hij|mi mam|mi pap|me levanto|me acuesto|desayuno|ceno)/i;
 
+const cap = t => t.replace(/\b\p{L}/gu, c => c.toUpperCase());
 const looksSpanish = t => !/[^\p{Script=Latin}\p{N}\p{P}\p{Zs}]/u.test(t) && (t.match(/[a-záéíóúüñ ]/gi) || []).length / t.length > 0.85;
 
 async function learnFrom(userText) {
   // "recuerda que ..." se guarda directo
   const r = userText.match(/^\s*(recuerda|acuérdate|acuerdate)( de)? que\s+(.+)/i);
   if (r) { await mem.addFact(r[3].replace(/[.!]+$/, ''), 'sobre-ti', 'me lo pediste'); renderFacts(); return; }
-  if (!PERSONAL.test(userText) || !brain.ready()) return;
+  if (!PERSONAL.test(userText)) return;
+  // Lo más común se aprende al instante, sin gastar al cerebro.
+  const quick = [
+    [/\b(?:me llamo|mi nombre es)\s+([a-záéíóúñ]+)/i, m => `Se llama ${cap(m[1])}`],
+    [/\btengo\s+(\d{1,3})\s+años/i, m => `Tiene ${m[1]} años`],
+    [/\bvivo en\s+([^.,!?]+)/i, m => `Vive en ${m[1].trim()}`],
+    [/\btrabajo (?:de|como|en)\s+([^.,!?]+)/i, m => `Trabaja ${m[0].match(/de|como|en/i)[0].toLowerCase()} ${m[1].trim()}`],
+    [/\bme (?:gusta|gustan|encanta|encantan)\s+([^.,!?]+)/i, m => `Le gusta ${m[1].trim()}`],
+    [/\bno me gusta(?:n)?\s+([^.,!?]+)/i, m => `No le gusta ${m[1].trim()}`],
+  ];
+  let got = 0;
+  for (const [re, fn] of quick) { const m = userText.match(re); if (m && await mem.addFact(fn(m))) got++; }
+  if (got) { renderFacts(); flashStatus('Lo guardé en mi memoria 💜'); return; }
+  if (!brain.ready()) return;
   const out = await brain.ask([
     { role: 'system', content: 'Extraes datos personales duraderos que una persona cuenta sobre sí misma (nombre, edad, gustos, trabajo, familia, lugar, metas, horarios y rutinas). Responde SOLO con una lista, un dato por línea empezando con "- ", escrito en tercera persona y corto (ej: "- Se llama Wilmer", "- Le gusta el café"). Ignora preguntas y cosas pasajeras. Si no hay datos personales, responde exactamente: NADA' },
     { role: 'user', content: userText },
@@ -136,11 +174,17 @@ async function renderHistory() {
 
 const webBtn = $('btnWeb');
 async function refreshWebBtn() {
-  const allowed = await mem.getSetting('allowWeb', false);
+  const allowed = await mem.getSetting('allowWeb', true);
   webBtn.disabled = !allowed;
   if (!allowed) webBtn.setAttribute('aria-pressed', 'false');
 }
 webBtn.onclick = () => webBtn.setAttribute('aria-pressed', webBtn.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
+
+// Preguntas de conocimiento (no de charla): con internet, Nova las consulta sola.
+function isKnowledgeQuestion(t) {
+  if (/\b(est[aá]s|eres|te llamas|te gusta|me |mi |mis |yo |piensas|opinas|sientes|recuerdas)\b/i.test(t)) return false;
+  return /\b(qui[eé]n|qu[eé] es|qu[eé] son|qu[eé] significa|cu[aá]ndo|d[oó]nde|cu[aá]nto|cu[aá]ntos|cu[aá]l es|por qu[eé]|c[oó]mo se|c[oó]mo funciona|historia de|capital de)\b/i.test(t);
+}
 
 let sending = false;
 async function send(text) {
@@ -154,10 +198,12 @@ async function send(text) {
   mem.logEvent('mensaje', { length: text.length });
 
   let webInfo = '', sources = [];
-  const allowWeb = await mem.getSetting('allowWeb', false);
-  const wantsWeb = webBtn.getAttribute('aria-pressed') === 'true' || /^(nova[, ]*)?(busca|buscar|investiga|averigua|consulta)\b/i.test(text) || web.needsLive(text);
+  const allowWeb = await mem.getSetting('allowWeb', true);
+  await checkOnline();
+  const wantsWeb = webBtn.getAttribute('aria-pressed') === 'true' || /^(nova[, ]*)?(busca|buscar|investiga|averigua|consulta)\b/i.test(text) || web.needsLive(text)
+    || (online() && isKnowledgeQuestion(text));
   if (wantsWeb && allowWeb) {
-    if (!online()) bubble('info', 'No hay internet ahora. Respondo con lo que ya sé.');
+    if (!online()) { if (!isKnowledgeQuestion(text) || web.needsLive(text)) bubble('info', 'No hay internet ahora. Respondo con lo que ya sé.'); }
     else {
       setStatus('Consultando fuentes...');
       try {
@@ -179,14 +225,19 @@ async function send(text) {
 
   $('btnSend').disabled = true;
   setStatus('Pensando...');
-  const facts = await mem.relevantFacts(text);
-  const history = (await mem.recentMessages(10)).map(m => ({ role: m.role, content: m.content }));
-  const msgs = [{ role: 'system', content: systemPrompt(facts, webInfo, lessonsFor(text)) }, ...history];
+  const { personal, learned } = await mem.factsForChat(text);
+  const history = (await mem.recentMessages(8)).map(m => ({ role: m.role, content: m.content }));
+  const last = history[history.length - 1];
+  if (last && last.role === 'user') last.content = turnContext(learned, lessonsFor(text), webInfo) + '\n\n' + last.content;
+  const msgs = [{ role: 'system', content: systemPrompt(personal) }, ...history];
   const b = bubble('assistant', '');
   b.classList.add('typing');
   let reply = '';
   try {
-    reply = await brain.chat(msgs, { onToken: t => { b.textContent = t; chatEl.scrollTop = chatEl.scrollHeight; } });
+    reply = await brain.chat(msgs, {
+      onToken: t => { b.textContent = t; chatEl.scrollTop = chatEl.scrollHeight; },
+      onRecover: () => { b.textContent = ''; setStatus('Me mareé un poco, me acomodo y sigo...'); },
+    });
   } catch (e) {
     reply = 'Uy, algo falló en mi cabecita: ' + (e.message || e);
   }
@@ -200,7 +251,7 @@ async function send(text) {
     b.appendChild(s);
   }
   await mem.addMessage('assistant', reply, srcList.length ? { sources: srcList } : {});
-  setStatus('En línea contigo · sin internet ✓');
+  setStatus(readyStatus());
   $('btnSend').disabled = false;
   sending = false;
   learnFrom(text).catch(() => {});
@@ -274,7 +325,7 @@ $('fileModelSetup').onchange = e => chooseLocalFile(e.target.files[0]);
 $('fileModel').onchange = e => chooseLocalFile(e.target.files[0]);
 
 function afterLoad() {
-  setStatus('En línea contigo · sin internet ✓');
+  setStatus(readyStatus());
   renderModelInfo();
   input.focus();
 }
@@ -285,7 +336,7 @@ async function boot() {
   await renderHistory();
   renderFacts();
   refreshWebBtn();
-  $('allowWeb').checked = await mem.getSetting('allowWeb', false);
+  $('allowWeb').checked = await mem.getSetting('allowWeb', true);
   renderStorage();
   const setting = await mem.getSetting('model');
   if (!setting) return showSetup();
@@ -438,7 +489,9 @@ if ('serviceWorker' in navigator) {
   }).catch(() => {});
 }
 
-window.addEventListener('online', () => flashStatus('Hay internet 🌐'));
-window.addEventListener('offline', () => flashStatus('Sin internet, pero sigo aquí 💜'));
+window.addEventListener('online', () => checkOnline(true));
+window.addEventListener('offline', () => { checkOnline(true); flashStatus('Sin internet, pero sigo aquí 💜'); });
+setInterval(() => checkOnline(true), 60000);
+checkOnline(true);
 
 boot();

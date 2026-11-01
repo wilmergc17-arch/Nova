@@ -101,6 +101,18 @@ export async function relevantFacts(query, limit = 25) {
   return facts.map(f => [score(f), f]).sort((a, b) => b[0] - a[0]).slice(0, limit).map(x => x[1]);
 }
 
+// Para conversar: datos personales en orden estable (no cambia entre mensajes, más rápido)
+// y lo aprendido de internet solo si tiene que ver con la pregunta.
+export async function factsForChat(query) {
+  const facts = await all('facts');
+  const personal = facts.filter(f => f.category === 'sobre-ti').sort((a, b) => a.created - b.created).slice(-20);
+  const q = new Set(norm(query).split(' ').filter(w => w.length > 3));
+  const learned = facts.filter(f => f.category !== 'sobre-ti')
+    .map(f => [norm(f.text).split(' ').filter(w => q.has(w)).length + (f.verified ? 0.5 : 0), f])
+    .filter(x => x[0] >= 1).sort((a, b) => b[0] - a[0]).slice(0, 3).map(x => x[1]);
+  return { personal, learned };
+}
+
 // ---------- Mensajes ----------
 export const addMessage = (role, content, extra = {}) => put('messages', { role, content, ts: Date.now(), ...extra });
 export async function recentMessages(n = 12) {

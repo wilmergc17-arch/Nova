@@ -51,13 +51,19 @@ function newEngine() {
   return w;
 }
 
+// Niveles de seguridad: si el cerebro se cae, se baja de nivel y se recuerda.
+// 0 = usa la GPU (solo computadoras) · 1 = solo procesador · 2 = procesador, 1 hilo y menos memoria
+const MOBILE = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
+let level = (() => { try { return Number(localStorage.getItem('nova-nivel')) || 0; } catch { return 0; } })();
+if (MOBILE && level < 1) level = 1; // la GPU del celular hace caer al cerebro
+function setLevel(n) { level = n; try { localStorage.setItem('nova-nivel', String(n)); } catch {} }
+export const safeLevel = () => level;
+
 function loadParams() {
-  const mobile = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent);
-  return {
-    n_ctx: mobile ? 2048 : 4096,
-    n_batch: 256,
-    warmup: false,
-  };
+  const p = { n_ctx: MOBILE ? 2048 : 4096, n_batch: 512, warmup: false };
+  if (level >= 1) p.n_gpu_layers = 0;
+  if (level >= 2) Object.assign(p, { n_threads: 1, n_ctx: 1024, n_batch: 128 });
+  return p;
 }
 
 async function unload() {
@@ -65,25 +71,40 @@ async function unload() {
   wllama = null;
 }
 
-// Descarga (solo la 1ª vez) y carga un modelo de la lista.
-export async function loadFromList(model, onProgress) {
-  await unload();
+let lastSource = null; // { type: 'list', model } o { type: 'local' }
+
+async function loadOnce(src, onProgress) {
   const w = newEngine();
+  const progressCallback = ({ loaded, total }) => onProgress && onProgress(loaded, total);
   try {
-    await w.loadModelFromUrl(model.url, {
-      ...loadParams(),
-      progressCallback: ({ loaded, total }) => onProgress && onProgress(loaded, total),
-    });
+    if (src.type === 'local') {
+      const dir = await navigator.storage.getDirectory();
+      const blob = await (await dir.getFileHandle(LOCAL_FILE)).getFile();
+      await w.loadModel([blob], loadParams());
+    } else {
+      await w.loadModelFromUrl(src.model.url, { ...loadParams(), progressCallback });
+    }
   } catch (e) {
-    // Si el teléfono no soporta la GPU, intenta solo con el procesador.
     await w.exit().catch(() => {});
-    const w2 = newEngine();
-    await w2.loadModelFromUrl(model.url, { ...loadParams(), n_gpu_layers: 0, progressCallback: ({ loaded, total }) => onProgress && onProgress(loaded, total) });
-    wllama = w2;
-    return;
+    throw e;
   }
-  wllama = w;
+  return w;
 }
+
+async function load(src, onProgress) {
+  await unload();
+  lastSource = src;
+  for (;;) {
+    try { wllama = await loadOnce(src, onProgress); return; }
+    catch (e) {
+      if (level >= 2 || /descarg|download|network|fetch/i.test(String(e?.message))) throw e;
+      setLevel(level + 1);
+    }
+  }
+}
+
+// Descarga (solo la 1ª vez) y carga un modelo de la lista.
+export const loadFromList = (model, onProgress) => load({ type: 'list', model }, onProgress);
 
 // ¿Está ya descargado este modelo en el dispositivo?
 export async function isDownloaded(model) {
@@ -124,22 +145,7 @@ export async function importLocalFile(file, onProgress) {
   await writable.close();
 }
 
-export async function loadLocal() {
-  await unload();
-  const dir = await navigator.storage.getDirectory();
-  const blob = await (await dir.getFileHandle(LOCAL_FILE)).getFile();
-  const w = newEngine();
-  try {
-    await w.loadModel([blob], loadParams());
-  } catch {
-    await w.exit().catch(() => {});
-    const w2 = newEngine();
-    await w2.loadModel([blob], { ...loadParams(), n_gpu_layers: 0 });
-    wllama = w2;
-    return;
-  }
-  wllama = w;
-}
+export const loadLocal = () => load({ type: 'local' });
 
 export const ready = () => !!wllama && wllama.isModelLoaded();
 export const isBusy = () => busy;
@@ -147,8 +153,20 @@ let replying = false;
 export const isReplying = () => replying;
 
 // Conversa en streaming: llama a onToken con el texto acumulado.
-export const chat = (...a) => exclusive(() => chatNow(...a));
-async function chatNow(messages, { onToken, maxTokens = 400, temperature = 0.7 } = {}) {
+const crashed = e => /crash|abort|runtime|unreachable|memory|reload the module/i.test(String(e?.message || e));
+
+// Si el cerebro se cae, se recupera solo en un modo más seguro y vuelve a intentar.
+export const chat = (messages, opts = {}) => exclusive(async () => {
+  try { return await chatNow(messages, opts); }
+  catch (e) {
+    if (!crashed(e) || level >= 2 || !lastSource) throw e;
+    opts.onRecover && opts.onRecover();
+    setLevel(level + 1);
+    await load(lastSource);
+    return chatNow(messages, opts);
+  }
+});
+async function chatNow(messages, { onToken, maxTokens = 300, temperature = 0.7 } = {}) {
   if (!ready()) throw new Error('El cerebro no está cargado.');
   busy = true; replying = true;
   let text = '';
@@ -172,7 +190,13 @@ async function chatNow(messages, { onToken, maxTokens = 400, temperature = 0.7 }
 }
 
 // Respuesta corta sin streaming (para tareas internas como aprender datos).
-export const ask = (...a) => exclusive(() => askNow(...a));
+export const ask = (messages, opts) => exclusive(async () => {
+  try { return await askNow(messages, opts); }
+  catch (e) {
+    if (crashed(e) && level < 2 && lastSource) { setLevel(level + 1); await load(lastSource).catch(() => {}); }
+    return '';
+  }
+});
 async function askNow(messages, { maxTokens = 120, temperature = 0.1 } = {}) {
   if (!ready()) return '';
   busy = true;
