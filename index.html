@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Nova</title>
+  <meta name="description" content="Nova, tu IA personal que funciona sin internet.">
+  <meta name="theme-color" content="#1b1530">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="who">
+      <div class="avatar" aria-hidden="true">N</div>
+      <div>
+        <h1>Nova</h1>
+        <p id="status" class="status">Preparando...</p>
+      </div>
+    </div>
+    <button id="btnMenu" class="icon-btn" aria-label="Abrir menú">☰</button>
+  </header>
+
+  <main id="chat" class="chat" aria-live="polite"></main>
+
+  <section id="setup" class="setup hidden">
+    <h2>Primero, elige el cerebro de Nova</h2>
+    <p>Se descarga <b>una sola vez</b>. Después Nova funciona sin internet, para siempre.</p>
+    <div id="modelList" class="model-list"></div>
+    <p class="small">¿Ya tienes el archivo del cerebro (.gguf) en el teléfono o en una USB?</p>
+    <label class="btn ghost">Cargar cerebro desde archivo
+      <input type="file" id="fileModelSetup" accept=".gguf" hidden>
+    </label>
+    <div id="progress" class="progress hidden"><div id="progressBar"></div><span id="progressText"></span></div>
+  </section>
+
+  <form id="composer" class="composer">
+    <button type="button" id="btnWeb" class="icon-btn web" aria-pressed="false" title="Buscar en internet para esta pregunta">🌐</button>
+    <textarea id="input" rows="1" placeholder="Escríbele a Nova..." autocomplete="off"></textarea>
+    <button type="submit" id="btnSend" class="send" aria-label="Enviar">➤</button>
+  </form>
+
+  <aside id="menu" class="menu hidden" aria-label="Menú">
+    <div class="menu-head">
+      <h2>Nova</h2>
+      <button id="btnCloseMenu" class="icon-btn" aria-label="Cerrar">✕</button>
+    </div>
+
+    <h3>🧠 Lo que Nova recuerda de ti</h3>
+    <ul id="factList" class="fact-list"></ul>
+    <form id="addFact" class="row">
+      <input id="newFact" placeholder="Enséñale algo: «Me gusta el café»">
+      <button class="btn">Añadir</button>
+    </form>
+
+    <h3>💾 Copia de la memoria</h3>
+    <p class="small">Guarda la memoria en un archivo para pasarla a la laptop, al ROG Ally o a una USB.</p>
+    <div class="row">
+      <button id="btnExport" class="btn">Exportar memoria</button>
+      <label class="btn ghost">Importar memoria
+        <input type="file" id="fileImport" accept=".json,application/json" hidden>
+      </label>
+    </div>
+
+    <h3>⚙️ Cerebro (modelo de IA)</h3>
+    <p id="modelInfo" class="small"></p>
+    <div class="row">
+      <button id="btnChangeModel" class="btn ghost">Cambiar cerebro</button>
+      <button id="btnSaveModel" class="btn ghost">Guardar cerebro en archivo</button>
+    </div>
+    <label class="btn ghost">Cargar cerebro desde archivo
+      <input type="file" id="fileModel" accept=".gguf" hidden>
+    </label>
+
+    <h3>🌐 Internet (opcional)</h3>
+    <label class="switch"><input type="checkbox" id="allowWeb"> Permitir que Nova busque en internet cuando se lo pida</label>
+    <p class="small">Lo que aprende en internet se guarda en su memoria y queda disponible sin conexión.</p>
+
+    <h3>🗑️ Zona peligrosa</h3>
+    <div class="row">
+      <button id="btnClearChat" class="btn danger ghost">Borrar conversación</button>
+      <button id="btnClearAll" class="btn danger">Borrar toda la memoria</button>
+    </div>
+    <p id="storageInfo" class="small"></p>
+    <p class="small">Versión <span id="version"></span></p>
+  </aside>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
