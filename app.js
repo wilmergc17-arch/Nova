@@ -1,14 +1,15 @@
 import * as mem from './memory.js';
 import * as brain from './brain.js';
 import * as web from './sources.js';
+import { lessonsFor } from './conocimiento.js';
 const online = () => navigator.onLine;
 
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 const $ = id => document.getElementById(id);
 const chatEl = $('chat');
 
 // ---------- Personalidad ----------
-function systemPrompt(facts, webInfo) {
+function systemPrompt(facts, webInfo, lessons = []) {
   const now = new Date();
   const fecha = now.toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   const hora = now.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
@@ -38,6 +39,7 @@ Hoy es ${fecha} y son las ${hora}.`;
   } else {
     p += `\n\nTodavía no sabes nada de la persona. Si es natural, pregúntale su nombre o algo de ella.`;
   }
+  if (lessons.length) p += `\n\nConocimiento que te enseñó Claude sobre este tema (úsalo como guía, explicado con tus palabras):\n` + lessons.map(l => `- ${l}`).join('\n');
   if (webInfo) p += `\n\nInformación que acabas de consultar en internet. Cada fuente trae su nivel de confianza. ` +
     `Antes de responder, DISCIERNE: compara las fuentes; da más peso a las de confianza alta y a lo que coincide en varias; ` +
     `si se contradicen, dilo y explica cuál parece más fiable; distingue hechos de opiniones; ` +
@@ -179,7 +181,7 @@ async function send(text) {
   setStatus('Pensando...');
   const facts = await mem.relevantFacts(text);
   const history = (await mem.recentMessages(10)).map(m => ({ role: m.role, content: m.content }));
-  const msgs = [{ role: 'system', content: systemPrompt(facts, webInfo) }, ...history];
+  const msgs = [{ role: 'system', content: systemPrompt(facts, webInfo, lessonsFor(text)) }, ...history];
   const b = bubble('assistant', '');
   b.classList.add('typing');
   let reply = '';
