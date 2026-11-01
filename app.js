@@ -21,14 +21,24 @@ const online = () => netState.ok;
 function readyStatus() { return netState.ok ? 'En línea contigo · con internet 🌐' : 'En línea contigo · sin internet ✓'; }
 function updateNetStatus() { if (/^En línea contigo/.test(statusBase)) setStatus(readyStatus()); }
 
-const VERSION = '1.4.1';
+const VERSION = '1.5.0';
 const $ = id => document.getElementById(id);
 const chatEl = $('chat');
 
 // ---------- Personalidad ----------
+// Versión corta para celulares: menos texto que leer = respuestas mucho más rápidas.
+function shortPrompt(facts, fecha) {
+  let p = `Eres Nova, una IA personal femenina que vive en el teléfono de una persona y funciona sin internet. Hablas en español y en femenino. ` +
+    `Eres cálida y sincera: dices la verdad con cariño, no adulas, admites cuando no sabes y nunca inventas datos. ` +
+    `Respondes breve y claro (2 a 4 frases), y si ayuda, haces una sola pregunta. Hoy es ${fecha}.`;
+  if (facts.length) p += `\nLo que sabes de la persona: ` + facts.map(f => f.text).join('. ') + '.';
+  return p;
+}
+
 function systemPrompt(facts) {
   const now = new Date();
   const fecha = now.toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  if (brain.isMobile) return shortPrompt(facts, fecha);
   let p = `Eres Nova, una inteligencia artificial personal con personalidad femenina. Hablas siempre en español y en femenino cuando hablas de ti ("estoy contenta", "soy curiosa"). Vives en el dispositivo de una sola persona y funcionas sin internet.
 
 Tu forma de ser:
@@ -92,6 +102,7 @@ async function saveLearned(items) {
   for (const it of items.slice(0, 5)) {
     if (!web.worthSaving(it)) continue;
     if (it.conf < 0.8) {
+      if (brain.isMobile) continue; // en el celular solo se guarda lo de confianza alta
       const verdict = await brain.ask([
         { role: 'system', content: 'Evalúas información. Responde con UNA palabra: DATO si es un hecho objetivo y verificable; OPINION si es opinión, rumor, publicidad o algo dudoso.' },
         { role: 'user', content: it.text.slice(0, 600) },
@@ -129,7 +140,7 @@ async function learnFrom(userText) {
   let got = 0;
   for (const [re, fn] of quick) { const m = userText.match(re); if (m && await mem.addFact(fn(m))) got++; }
   if (got) { renderFacts(); flashStatus('Lo guardé en mi memoria 💜'); return; }
-  if (!brain.ready()) return;
+  if (!brain.ready() || brain.isMobile) return; // en el celular no se gasta al cerebro en esto
   const out = await brain.ask([
     { role: 'system', content: 'Extraes datos personales duraderos que una persona cuenta sobre sí misma (nombre, edad, gustos, trabajo, familia, lugar, metas, horarios y rutinas). Responde SOLO con una lista, un dato por línea empezando con "- ", escrito en tercera persona y corto (ej: "- Se llama Wilmer", "- Le gusta el café"). Ignora preguntas y cosas pasajeras. Si no hay datos personales, responde exactamente: NADA' },
     { role: 'user', content: userText },
@@ -226,9 +237,9 @@ async function send(text) {
   $('btnSend').disabled = true;
   setStatus('Pensando...');
   const { personal, learned } = await mem.factsForChat(text);
-  const history = (await mem.recentMessages(8)).map(m => ({ role: m.role, content: m.content }));
+  const history = (await mem.recentMessages(brain.isMobile ? 6 : 8)).map(m => ({ role: m.role, content: m.content }));
   const last = history[history.length - 1];
-  if (last && last.role === 'user') last.content = turnContext(learned, lessonsFor(text), webInfo) + '\n\n' + last.content;
+  if (last && last.role === 'user') last.content = turnContext(learned, lessonsFor(text, brain.isMobile ? 1 : 2), webInfo) + '\n\n' + last.content;
   const msgs = [{ role: 'system', content: systemPrompt(personal) }, ...history];
   const b = bubble('assistant', '');
   b.classList.add('typing');
@@ -237,6 +248,7 @@ async function send(text) {
     reply = await brain.chat(msgs, {
       onToken: t => { b.textContent = t; chatEl.scrollTop = chatEl.scrollHeight; },
       onRecover: () => { b.textContent = ''; setStatus('Me mareé un poco, me acomodo y sigo...'); },
+      onTick: (sec, writing) => { if (!writing) setStatus(sec < 8 ? 'Pensando...' : `Leyendo tu mensaje... ${sec} s`); else if (statusBase !== 'Escribiendo...') setStatus('Escribiendo...'); },
     });
   } catch (e) {
     reply = 'Uy, algo falló en mi cabecita: ' + (e.message || e);
@@ -474,6 +486,9 @@ async function renderStorage() {
     const e = await navigator.storage.estimate();
     const p = await navigator.storage.persisted?.();
     $('storageInfo').textContent = `Espacio usado en este dispositivo: ${fmtMB(e.usage || 0)}${p ? ' · protegido contra borrado automático ✓' : ''}`;
+    const d = brain.info();
+    $('diag').textContent = `Diagnóstico: ${d.mobile ? 'celular' : 'computadora'} · núcleos ${d.cores} · hilos ${d.threads} · modo rápido ${d.isolated ? 'sí' : 'NO'} · nivel ${d.level}` +
+      (d.at ? ` · última respuesta: leyó ${d.promptTokens || '?'} tokens en ${d.promptSec.toFixed(1)} s, escribió ${d.genPerSec.toFixed(1)} tokens/s` : ' · aún sin respuestas');
   } catch {}
 }
 

@@ -58,6 +58,7 @@ let level = (() => { try { return Number(localStorage.getItem('nova-nivel')) || 
 if (MOBILE && level < 1) level = 1; // la GPU del celular hace caer al cerebro
 function setLevel(n) { level = n; try { localStorage.setItem('nova-nivel', String(n)); } catch {} }
 export const safeLevel = () => level;
+export const isMobile = MOBILE;
 
 function loadParams() {
   const p = { n_ctx: MOBILE ? 2048 : 4096, n_batch: 512, warmup: false };
@@ -153,7 +154,7 @@ let replying = false;
 export const isReplying = () => replying;
 
 // Conversa en streaming: llama a onToken con el texto acumulado.
-const crashed = e => /crash|abort|runtime|unreachable|memory|reload the module/i.test(String(e?.message || e));
+const crashed = e => /crash|abort|runtime|unreachable|memory|reload the module|colgado/i.test(String(e?.message || e));
 
 // Si el cerebro se cae, se recupera solo en un modo más seguro y vuelve a intentar.
 export const chat = (messages, opts = {}) => exclusive(async () => {
@@ -166,10 +167,30 @@ export const chat = (messages, opts = {}) => exclusive(async () => {
     return chatNow(messages, opts);
   }
 });
-async function chatNow(messages, { onToken, maxTokens = 300, temperature = 0.7 } = {}) {
+export const stats = { promptTokens: 0, promptSec: 0, genPerSec: 0, at: 0 };
+export function info() {
+  let threads = '?';
+  try { threads = wllama?.getNumThreads?.() ?? '?'; } catch {}
+  return { mobile: MOBILE, level, isolated: !!self.crossOriginIsolated, threads, cores: navigator.hardwareConcurrency || '?', ...stats };
+}
+
+// Si el cerebro no da señales en este tiempo, se considera colgado.
+const FIRST_TOKEN_LIMIT = MOBILE ? 150000 : 120000;
+const NEXT_TOKEN_LIMIT = 60000;
+
+async function chatNow(messages, { onToken, onTick, maxTokens = 300, temperature = 0.7 } = {}) {
   if (!ready()) throw new Error('El cerebro no está cargado.');
   busy = true; replying = true;
   let text = '';
+  const ctrl = new AbortController();
+  const t0 = performance.now();
+  let tFirst = 0, last = t0, timedOut = false;
+  const dog = setInterval(() => {
+    const now = performance.now();
+    onTick && onTick(Math.round((now - t0) / 1000), !!tFirst);
+    if (now - last > (tFirst ? NEXT_TOKEN_LIMIT : FIRST_TOKEN_LIMIT)) { timedOut = true; ctrl.abort(); }
+  }, 1000);
+  let tokens = 0, timings = null;
   try {
     const stream = await wllama.createChatCompletion({
       messages,
@@ -178,13 +199,28 @@ async function chatNow(messages, { onToken, maxTokens = 300, temperature = 0.7 }
       top_p: 0.9,
       top_k: 40,
       stream: true,
+      abortSignal: ctrl.signal,
     });
     for await (const chunk of stream) {
+      if (chunk?.timings) timings = chunk.timings;
       const d = chunk?.choices?.[0]?.delta?.content;
-      if (d) { text += d; onToken && onToken(text); }
+      if (d) {
+        if (!tFirst) tFirst = performance.now();
+        last = performance.now(); tokens++;
+        text += d; onToken && onToken(text);
+      }
     }
+  } catch (e) {
+    if (timedOut) throw new Error('colgado: tardó demasiado');
+    throw e;
   } finally {
+    clearInterval(dog);
     busy = false; replying = false;
+    const end = performance.now();
+    stats.promptTokens = timings?.prompt_n ?? stats.promptTokens;
+    stats.promptSec = timings?.prompt_ms ? timings.prompt_ms / 1000 : tFirst ? (tFirst - t0) / 1000 : (end - t0) / 1000;
+    stats.genPerSec = timings?.predicted_per_second ?? (tFirst && tokens > 1 ? tokens / ((end - tFirst) / 1000) : 0);
+    stats.at = Date.now();
   }
   return text.trim();
 }
@@ -201,7 +237,9 @@ async function askNow(messages, { maxTokens = 120, temperature = 0.1 } = {}) {
   if (!ready()) return '';
   busy = true;
   try {
-    const r = await wllama.createChatCompletion({ messages, max_tokens: maxTokens, temperature });
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 60000);
+    const r = await wllama.createChatCompletion({ messages, max_tokens: maxTokens, temperature, abortSignal: ctrl.signal }).finally(() => clearTimeout(t));
     return r?.choices?.[0]?.message?.content?.trim() || '';
   } finally {
     busy = false;
