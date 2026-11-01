@@ -48,7 +48,7 @@
       <button id="btnCloseMenu" class="icon-btn" aria-label="Cerrar">✕</button>
     </div>
 
-    <h3>🧠 Lo que Nova recuerda de ti</h3>
+    <h3>🧠 Lo que Nova recuerda y ha aprendido</h3>
     <ul id="factList" class="fact-list"></ul>
     <form id="addFact" class="row">
       <input id="newFact" placeholder="Enséñale algo: «Me gusta el café»">
@@ -75,8 +75,14 @@
     </label>
 
     <h3>🌐 Internet (opcional)</h3>
-    <label class="switch"><input type="checkbox" id="allowWeb"> Permitir que Nova busque en internet cuando se lo pida</label>
-    <p class="small">Lo que aprende en internet se guarda en su memoria y queda disponible sin conexión.</p>
+    <label class="switch"><input type="checkbox" id="allowWeb"> Permitir que Nova consulte internet</label>
+    <p class="small">Busca cuando tocas 🌐, cuando le dices «busca…» o «investiga a fondo…», o cuando preguntas por el clima, el dólar, noticias o pegas un enlace. Compara las fuentes, les da un nivel de confianza y solo guarda en su memoria lo confiable. Lo guardado queda disponible sin conexión.</p>
+    <p class="small"><b>Fuentes que puede usar:</b></p>
+    <ul id="sourceList" class="source-list"></ul>
+    <form id="cityForm" class="row">
+      <input id="city" placeholder="Tu ciudad (para el clima)">
+      <button class="btn ghost">Guardar</button>
+    </form>
 
     <h3>🗑️ Zona peligrosa</h3>
     <div class="row">

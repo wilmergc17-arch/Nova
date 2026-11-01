@@ -60,7 +60,7 @@ export async function listFacts() {
   return f.sort((a, b) => b.updated - a.updated);
 }
 
-export async function addFact(text, category = 'sobre-ti', source = 'conversación') {
+export async function addFact(text, category = 'sobre-ti', source = 'conversación', extra = {}) {
   text = (text || '').trim();
   if (text.length < 3) return null;
   const facts = await all('facts');
@@ -73,11 +73,15 @@ export async function addFact(text, category = 'sobre-ti', source = 'conversaci�
     await put('facts', same);
     return same;
   }
-  const fact = { id: crypto.randomUUID(), text, category, source, created: now, updated: now, hits: 1 };
+  const fact = { id: crypto.randomUUID(), text, category, source, created: now, updated: now, hits: 1, ...extra };
   await put('facts', fact);
   return fact;
 }
 export const deleteFact = id => del('facts', id);
+export async function updateFact(id, changes) {
+  const f = await run('facts', 'readonly', s => s.get(id));
+  if (f) await put('facts', { ...f, ...changes, updated: Date.now() });
+}
 
 // Elige los recuerdos más útiles para la pregunta actual (sin internet, por palabras).
 export async function relevantFacts(query, limit = 25) {
@@ -87,7 +91,9 @@ export async function relevantFacts(query, limit = 25) {
   const score = f => {
     let s = 0;
     for (const w of norm(f.text).split(' ')) if (q.has(w)) s += 3;
-    if (f.category === 'sobre-ti') s += 1;
+    if (f.category === 'sobre-ti' || f.verified) s += 1;
+    if (f.category === 'noticia') s -= (Date.now() - f.created) / 864e5 * 0.1; // las noticias envejecen
+    s += (f.confidence ?? 0.8) - 0.8;
     s += Math.min(f.hits || 1, 5) * 0.3;
     s += (f.updated / Date.now()) * 0.5;
     return s;
@@ -121,7 +127,10 @@ export async function exportAll() {
 export async function importAll(data) {
   if (!data || data.format !== FORMAT) throw new Error('Este archivo no es una memoria de Nova.');
   let n = 0;
-  for (const f of data.facts || []) { if (await addFact(f.text, f.category, f.source)) n++; }
+  for (const f of data.facts || []) {
+    const { id, text, category, source, created, updated, hits, ...extra } = f;
+    if (await addFact(text, category, source, extra)) n++;
+  }
   const existing = new Set((await all('messages')).map(m => m.ts + m.role));
   for (const m of data.messages || []) {
     if (existing.has(m.ts + m.role)) continue;

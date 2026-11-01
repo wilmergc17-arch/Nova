@@ -1,8 +1,8 @@
 // Service worker de Nova: guarda la app en el dispositivo para que abra sin internet.
 // El cerebro (modelo) lo guarda aparte el motor de IA, en el almacenamiento privado.
-const CACHE = 'nova-app-v1.0.1';
+const CACHE = 'nova-app-v1.1.0';
 const SHELL = [
-  './', 'index.html', 'styles.css', 'app.js', 'memory.js', 'brain.js', 'web.js',
+  './', 'index.html', 'styles.css', 'app.js', 'memory.js', 'brain.js', 'sources.js',
   'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
   'vendor/wllama/index.js', 'vendor/wllama/wllama.wasm',
 ];

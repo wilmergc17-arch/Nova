@@ -139,3 +139,8 @@ h1 { font-size: 18px; margin: 0; }
 }
 .fact-list li small { color: var(--muted); display: block; }
 .fact-list button { background: none; border: none; color: var(--muted); font-size: 16px; cursor: pointer; }
+.source-list { list-style: none; padding: 0; margin: 0; }
+.source-list li { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.source-list label { display: flex; gap: 10px; align-items: flex-start; }
+.source-list small { display: block; color: var(--muted); }
+.fact-list li > span:last-child { display: flex; gap: 2px; flex-shrink: 0; }

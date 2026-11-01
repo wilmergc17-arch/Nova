@@ -30,7 +30,7 @@ y abre http://localhost:8000 en Chrome o Edge. (Hace falta Python; no se necesit
 - `app.js` – pantalla de chat, personalidad de Nova y aprendizaje.
 - `memory.js` – memoria local (recuerdos, conversación, horarios de uso para aprender rutinas).
 - `brain.js` – motor de IA local ([wllama](https://github.com/ngxson/wllama), licencia MIT, en `vendor/`).
-- `web.js` – búsqueda opcional en Wikipedia cuando hay internet.
+- `sources.js` – fuentes gratuitas de internet (Wikipedia, DuckDuckGo, Wikcionario, clima Open-Meteo, tipo de cambio, noticias GDELT y Wikinoticias, Open Library, lector de páginas Jina) y el criterio para discernir: confianza por fuente, coincidencia entre fuentes, descarte de publicidad/rumores y solo guarda lo confiable.
 - `sw.js` – hace que la app abra sin conexión.
 
 Próximos pasos: voz, aprender rutinas, y que Nova te hable por iniciativa propia.
